@@ -1,0 +1,75 @@
+
+x-configs: &common_config
+  restart: always
+  env_file:
+    - .env
+  networks:
+    - app-network
+
+services:
+  app:
+    <<: *common_config
+    container_name: market-data
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: ${FASTAPI_ENV}
+    expose:
+      - 8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+
+  db:
+    image: postgres
+    container_name: postgresql_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    expose:
+      - 5432
+    env_file:
+      - ./.env
+    restart: always
+    networks:
+      - app-network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    <<: *common_config
+    image: redis:alpine
+    container_name: redis
+    expose:
+      - 6379
+    ports:
+      - 6379:6379
+    volumes:
+      - redis_data:/var/lib/redis
+
+  nginx:
+    <<: *common_config
+    image: nginx:1.23-alpine
+    container_name: my_nginx
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  app-network:
+    driver: bridge
