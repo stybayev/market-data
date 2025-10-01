@@ -1,93 +1,190 @@
+
 # market-data
 
+Сервис рыночных данных: принимает поток котировок от провайдеров (Polygon и др.), нормализует, публикует в Kafka, хранит историю в TimescaleDB и отдаёт данные клиентам по HTTP/WS.
 
+## Цели и границы
 
-## Getting started
+* Источник правды по **последним ценам** (last/bid/ask) и **истории** (минутные свечи).
+* Единый **формат сообщений** и **стабильный идентификатор** инструмента `asset_id`.
+* Внешний контракт для клиентов: HTTP и WebSocket эндпоинты `/v1/*`.
+* Внутренний обмен — через Kafka.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+---
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Идентификаторы и маппинг (asset_id)
 
-## Add your files
+* Каждый инструмент в системе имеет **стабильный `asset_id`** (INT или UUID).
+* Пара `symbol + exchange` маппится на `asset_id` через таблицу `assets_map`.
+* Уникальность: **(`symbol`, `exchange`)**.
+* Если провайдер переименовал тикер — создаётся **новая** пара (`symbol`, `exchange`), но правило по сохранению/смене `asset_id` фиксируете заранее (либо сохраняете старый `asset_id`, либо создаёте новый — выберите и запишите).
+* Все сообщения в Kafka и ответы API **обязаны** содержать `asset_id`. Консьюмеры не резолвят сырой тикер.
 
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+**Кэш резолва**: `symbol+exchange → asset_id` держим в Redis. TTL 10–60 мин.
 
+---
+
+## Форматы сообщений (Kafka)
+
+Общие правила:
+
+* `ts` — всегда **UTC ISO-8601** (например: `2025-10-01T10:00:00.123456Z`).
+* Денежные поля (`last`, `bid`, `ask`, `open`, …) — **строки** c нужной точностью (`"172.3500"`).
+* Поле `v` — **версия** формата (начинаем с `1`).
+* `exchange` — нормализованный код биржи (например, `NASDAQ`, `NYSE`, `CBOE`).
+* `source` — `polygon`, `calc` (агрегировано внутри сервиса) и т.п.
+* **Kafka message key**: `asset_id`.
+
+### Топик: `ticks.raw` (сырые тики/котировки)
+
+```json
+{
+  "v": 1,
+  "type": "trade",                     // "trade" | "quote"
+  "asset_id": 12345,
+  "symbol": "AAPL",
+  "exchange": "NASDAQ",
+  "ts": "2025-10-01T10:00:00.123456Z",
+  "last": "172.3500",                  // для trade
+  "bid": "172.3400",                   // для quote
+  "ask": "172.3600",                   // для quote
+  "volume": "100",
+  "source": "polygon"
+}
 ```
-cd existing_repo
-git remote add origin https://gtl.investlink.io/backend/market-data.git
-git branch -M main
-git push -uf origin main
+
+### Топик: `bars.1m` (минутные свечи)
+
+```json
+{
+  "v": 1,
+  "type": "bar_1m",
+  "asset_id": 12345,
+  "symbol": "AAPL",
+  "exchange": "NASDAQ",
+  "tf": "1m",
+  "ts": "2025-10-01T10:00:00Z",       // начало минуты
+  "open":  "172.10",
+  "high":  "172.50",
+  "low":   "172.00",
+  "close": "172.35",
+  "volume":"15420",
+  "source":"calc"
+}
 ```
 
-## Integrate with your tools
+---
 
-- [ ] [Set up project integrations](https://gtl.investlink.io/backend/market-data/-/settings/integrations)
+## Kafka топики
 
-## Collaborate with your team
+* `ticks.raw` — входящие тики/котировки (retention 24–48 ч; partitions 3–6).
+* `last.price` — «последняя цена» (логично использовать compaction; partitions 3–6).
+* `bars.1m` — минутные свечи (retention 7–30 дней; partitions 3–6).
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+Политики ретенции/compaction — зафиксировать в инфраструктурном репо.
 
-## Test and Deploy
+---
 
-Use the built-in continuous integration in GitLab.
+## Хранилище
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+* **TimescaleDB / Postgres**:
 
-***
+  * `ohlc_1m(asset_id, ts, open, high, low, close, volume)` — hypertable, PK `(asset_id, ts)`, индексы по времени.
+  * `last_price(asset_id, ts, bid, ask, last, volume)` — upsert по `asset_id`.
+  * Политики: retention и compression для `ohlc_1m`.
+* **Redis**:
 
-# Editing this README
+  * Кэш last-price: ключ `quote:{asset_id}`.
+  * Rate-limit и вспомогательные счётчики.
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+---
 
-## Suggestions for a good README
+## Потоки данных (в общем виде)
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+1. **Провайдер → Kafka (`ticks.raw`)**: подписка на WS Polygon, нормализация, публикация.
+2. **Обновление последней цены**: консьюмер читает `ticks.raw` → апдейт `last_price` (и Redis).
+3. **Агрегация минуток**: консьюмер читает `ticks.raw` → собирает OHLC 1m → публикует в `bars.1m`.
+4. **Сохранение минуток**: консьюмер читает `bars.1m` → пишет в `ohlc_1m`.
+5. **API/WS**: читает из БД/Redis и отдаёт клиентам.
 
-## Name
-Choose a self-explaining name for your project.
+---
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+## API (внешний контракт)
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+Префикс: `/v1`
+Аутентификация: API-ключ/JWT (в заголовке, формат описывается в отдельном разделе).
+Ответы — JSON. Время — UTC. Пагинации и лимиты — фиксируются.
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+**HTTP**
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+* `GET /v1/quotes/last?ids=1,2,3`
+  Возвращает батч «последних цен»: объекты `{asset_id, ts, bid, ask, last, volume}`.
+* `GET /v1/ohlc?asset_id=...&tf=1m&from=...&to=...`
+  Возвращает массив свечей в хронологическом порядке.
+* (опц.) `GET /v1/chart/series` — обёртка под фронтовой график (готовый массив точек).
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+**WebSocket / SSE**
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+* `WS /v1/stream/quotes?ids=1,2,3`
+  Пуш событий last-price в формате `{asset_id, ts, bid, ask, last, volume}`.
+  Хартбит, ограничение max количества `ids` на подписку.
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+**Служебные**
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+* `GET /health/live` — жив ли процесс.
+* `GET /health/ready` — готов ли сервис (подключения к Kafka, БД и т.п.).
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+---
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+## Наблюдаемость
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+**Prometheus метрики**
 
-## License
-For open source projects, say how it is licensed.
+* Экспорт `/metrics` из приложения: RPS, p95/p99 по ручкам, 5xx, latency БД.
+* Kafka: лаги по партициям/группам, обработанные сообщения/сек.
+* Timescale/Postgres: длительность запросов, размер таблиц, autovacuum.
+* Redis (если используется): hit-ratio, задержки.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+**Grafana дашборды**
+
+* API: RPS, ошибки, задержки, p95.
+* Kafka: лаги по каждому топику/группе, throughput.
+* Timescale: рост `ohlc_1m`, длительность insert/select, компрессия.
+* Redis: keyspace, latency.
+
+**Алерты**
+
+* «Нет тиков по активному рынку > N секунд».
+* «Лаг консюмера > X секунд».
+* «p95 `/v1/quotes/last` > Y мс», «ошибки 5xx > Z%».
+* «Диска для Timescale < 15%».
+
+---
+
+## Логи (ELK)
+
+* Логи структурированные (JSON) с полями: `ts`, `level`, `service`, `request_id`, `route`, `status`, `duration_ms`, `kafka_topic`, `partition`, `offset`.
+* Сбор через Filebeat/Fluent Bit в Logstash → Elasticsearch → Kibana.
+* Шаблоны индексов и политика хранения (например, 14–30 дней).
+
+---
+
+
+
+## Качество и эксплуатация
+
+* Идемпотентность: повторная обработка сообщений не должна создавать дубликаты (upsert; фикс оффсета только после успешной записи).
+* Перезапуски воркеров: корректное закрытие, контроль оффсетов, быстрый ресинк.
+* Нагрузочные прогоны основных ручек (`/v1/quotes/last`, `/v1/ohlc`).
+* Ограничения: максимальная длина списка `ids` (например, ≤ 200), ограничение диапазона дат.
+
+---
+
+## Что дальше (эволюция)
+
+* Добавить `bars.1d`, агрегации `1m → 5m/1h/1d`.
+* Отдельный `assets-catalog` сервис и полноценные справочники.
+* Переключение/агрегация нескольких провайдеров (источников).
+
+---
+
