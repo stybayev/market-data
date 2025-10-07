@@ -27,8 +27,6 @@ class Settings(BaseSettings):
         log_sql_queries: Флаг для логирования SQL-запросов.
         redis_host: Хост Redis.
         redis_port: Порт Redis.
-        monolith: Настройки монолита.
-        service_token: Токен для сервиса auth, используется для аутентификации роутов в заголовке.
     """
 
     # App
