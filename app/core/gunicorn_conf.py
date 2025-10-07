@@ -40,7 +40,7 @@ class GunicornSettings(BaseSettings):
         """Конфигурация для Pydantic."""
 
         env_file = '.env'
-        env_prefix = 'GUNICORN_'
+        env_prefix = 'AUTH_API_GUNICORN_'
 
     @property
     def bind_address(self) -> str:
