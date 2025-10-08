@@ -53,7 +53,7 @@ app = FastAPI(
 
 # Регистрация ендпойнтов
 # app.include_router(router_users, prefix='/api/v1/users')
-
+print(1223)
 # Регистрация обработчиков ошибок
 app.add_exception_handler(BaseApplicationError, application_error_handler)  # type: ignore
 app.add_exception_handler(ValidationError, validation_exception_handler)  # type: ignore

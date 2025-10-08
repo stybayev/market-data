@@ -7,9 +7,10 @@ x-configs: &common_config
     - app-network
 
 services:
-  app:
+  # WebSocket/API для клиентов
+  client-ws:
     <<: *common_config
-    container_name: market-data
+    container_name: client-ws
     build:
       context: .
       dockerfile: docker/Dockerfile
@@ -19,32 +20,9 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      db:
-        condition: service_healthy
+      - redis
     volumes:
       - .:/app
-
-  db:
-    image: postgres
-    container_name: postgresql_db
-    volumes:
-      - postgres_data:/var/lib/postgresql/data/
-    expose:
-      - 5432
-    env_file:
-      - ./.env
-    restart: always
-    networks:
-      - app-network
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "sh -c 'pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}'",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 
   redis:
     <<: *common_config
@@ -66,8 +44,17 @@ services:
     ports:
       - "80:80"
 
+  timescaledb:
+    <<: *common_config
+    image: timescale/timescaledb:latest-pg17
+    ports:
+      - "5432:5432"
+    volumes:
+      - tsdb_data:/var/lib/postgresql/data
+    profiles: [ "with-timescale" ]
+
 volumes:
-  postgres_data:
+  tsdb_data:
   redis_data:
 
 networks:
