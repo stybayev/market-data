@@ -9,6 +9,8 @@ from redis.asyncio import Redis
 from sqlalchemy.exc import SQLAlchemyError
 import sentry_sdk
 
+from ws.client_ws import router as websocket_router
+
 from app.core.config import settings
 from app.db import redis
 from app.dependencies.main import setup_dependencies
@@ -52,8 +54,8 @@ app = FastAPI(
 )
 
 # Регистрация ендпойнтов
-# app.include_router(router_users, prefix='/api/v1/users')
-print(1223)
+app.include_router(websocket_router)
+
 # Регистрация обработчиков ошибок
 app.add_exception_handler(BaseApplicationError, application_error_handler)  # type: ignore
 app.add_exception_handler(ValidationError, validation_exception_handler)  # type: ignore
