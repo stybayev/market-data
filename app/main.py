@@ -9,7 +9,7 @@ from redis.asyncio import Redis
 from sqlalchemy.exc import SQLAlchemyError
 import sentry_sdk
 
-from ws.client_ws import router as websocket_router
+from app.ws.client_ws import router as websocket_router
 
 from app.core.config import settings
 from app.db import redis
