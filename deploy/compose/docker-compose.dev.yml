@@ -2,7 +2,7 @@
 x-configs: &common_config
   restart: always
   env_file:
-    - .env
+    - ../env/.env
   networks:
     - app-network
 
@@ -12,8 +12,8 @@ services:
     <<: *common_config
     container_name: client-ws
     build:
-      context: .
-      dockerfile: docker/Dockerfile
+      context: ../..
+      dockerfile: Dockerfile
       target: ${FASTAPI_ENV}
     expose:
       - 8080
@@ -22,7 +22,7 @@ services:
     depends_on:
       - redis
     volumes:
-      - .:/app
+      - ../..:/app
 
   redis:
     <<: *common_config
@@ -40,7 +40,7 @@ services:
     image: nginx:1.23-alpine
     container_name: my_nginx
     volumes:
-      - ./nginx/conf.d:/etc/nginx/conf.d
+      - ../nginx/conf.d:/etc/nginx/conf.d
     ports:
       - "80:80"
 
