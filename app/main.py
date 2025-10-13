@@ -39,11 +39,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         send_default_pii=True,
     )
 
-    redis.connection = Redis(host=settings.redis_host, port=settings.redis_port)
-
-    yield
-
-    await redis.connection.close()
+    await redis.init_redis(settings)
+    try:
+        yield
+    finally:
+        await redis.close_redis()
 
 app = FastAPI(
     title=settings.project_name,
