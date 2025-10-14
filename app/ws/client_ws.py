@@ -34,10 +34,14 @@ def normalize_tickers(raw: str) -> List[str]:
 
 @router.websocket('/ws/market-stream')
 async def websocket_endpoint(ws: WebSocket):
+    """
+    Подписка на тикеры, отписка, получение последних цен.
+    """
     await ws.accept()
     try:
         while True:
             raw = await ws.receive_text()
+            print(raw)
             try:
                 data = None
                 data = json.loads(raw)
