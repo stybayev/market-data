@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # Redis
     redis_host: str
     redis_port: int
-    redis_pubsub_channel: str = 'pubsub:subs:diff'
+    redis_pubsub_channel: str
 
     # Logging
     sentry_dsn: str
