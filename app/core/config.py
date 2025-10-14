@@ -21,12 +21,12 @@ class Settings(BaseSettings):
 
     Атрибуты:
         project_name: Название проекта.
-        uvicorn_host: Хост для Uvicorn.
-        uvicorn_port: Порт для Uvicorn.
         db: Настройки базы данных.
         log_sql_queries: Флаг для логирования SQL-запросов.
         redis_host: Хост Redis.
         redis_port: Порт Redis.
+        redis_pubsub_channel: Строка канала Pub/Sub Redis.
+        ws_max_subs_per_user: Максимум тикеров в одной подписке.
     """
 
     # App
@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     redis_host: str
     redis_port: int
     redis_pubsub_channel: str | None
+
+    # WebSockets
+    ws_max_subs_per_user: int = 500
 
     # Logging
     sentry_dsn: str
