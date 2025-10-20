@@ -23,13 +23,12 @@ def normalize_tickers(raw: str) -> List[str]:
     "A.TSLA, A.ARAV,A.NVDA" -> ['A.TSLA', 'A.ARAV', 'A.NVDA']
     + валидация и дедупликация.
     """
-
     items = [t.strip().upper() for t in raw.split(',')]
     items = [t for t in items if t]
     bad = [t for t in items if not TICKER_RE.match(t)]
     if bad:
         raise ValueError(f'invalid tickers: {", ".join(bad)}')
-    return list(dict.fromkeys(items))  # дедуп с сохранением порядка
+    return list(dict.fromkeys(items))
 
 
 @router.websocket('/ws/market-stream')
@@ -41,7 +40,6 @@ async def websocket_endpoint(ws: WebSocket):
     try:
         while True:
             raw = await ws.receive_text()
-            print(raw)
             try:
                 data = None
                 data = json.loads(raw)
