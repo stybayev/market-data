@@ -1,8 +1,8 @@
-from typing import List, Literal, Optional
+from typing import List
 
 from pydantic import BaseModel, field_validator
 
-from app.enums import Action
+from app.enums import Action, AckStatus
 
 
 class IncomingMessageDTO(BaseModel):
@@ -27,8 +27,8 @@ class OutgoingAckDTO(BaseModel):
     DTO для ответов клиенту.
     """
     request_id: int
-    status: Literal['ok', 'error']
+    status: AckStatus
     action: Action
     user_id: int
     tickers: List[str]
-    error: Optional[str] = None
+    error: str | None = None
