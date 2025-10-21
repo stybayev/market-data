@@ -24,6 +24,20 @@ services:
     volumes:
       - ../..:/app
 
+  subscription-manager:
+    # Manager для управления подписками и отписками в redis
+    <<: *common_config
+    container_name: subscription-manager
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: ${FASTAPI_ENV}
+    depends_on:
+      - redis
+    command: poetry run python -m app.subscription_manager.main
+    volumes:
+      - ../..:/app
+
   redis:
     <<: *common_config
     image: redis:alpine
